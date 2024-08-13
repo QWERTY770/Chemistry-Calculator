@@ -1,6 +1,7 @@
 from substances import *
 from math import log10
 from mpmath import mp, power
+
 mp.prec = 53
 mp.dps = 24
 mp.eps = power(10, -30)
@@ -26,8 +27,6 @@ class WaterSystem:
                 self.groups[spec[0]] = spec[1] * c
 
     def add(self, c, sub: Substance):
-        if isinstance(c, float):
-            c = Decimal(c)
         if sub in self.substances:
             self.substances[sub] += c
         else:
@@ -38,19 +37,34 @@ class WaterSystem:
             else:
                 self.groups[spec[0]] = spec[1] * c
 
+    def set(self, c, sub: Substance):
+        c0 = 0
+        if sub in self.substances:
+            c0 = self.substances[sub]
+        self.substances[sub] = c
+        for spec in sub.species:
+            if spec[0] in self.groups:
+                self.groups[spec[0]] += spec[1] * (c - c0)
+            else:
+                self.groups[spec[0]] = spec[1] * c
+
+    def set_volume(self, ratio):
+        for i in self.substances.keys():
+            c = self.substances[i]
+            self.set(c * ratio, i)
+
     def _solve(self, equation, initial_value=Decimal("1E-7")):
         tol = -30
-        solution = nsolve(equation, self.cH, initial_value, maxsteps=100, tol=power(10, tol))
-        if solution < 0:
-            solution = nsolve(equation.subs(self.cH, self.Kw / self.cOH),
-                              self.cOH, initial_value, maxsteps=100, tol=power(10, tol))
+        try:
+            solution = nsolve(equation, self.cH, initial_value, maxsteps=50, tol=power(10, tol))
             if solution < 0:
-                solution = nsolve(equation, (Decimal("1E-20"), 1),
+                solution = nsolve(equation, (Decimal("1E-20"), Decimal("100")),
                                   solver="bisect", verify=False, maxsteps=200, tol=power(10, tol))
-                if solution < 0:
-                    raise RuntimeError(f"Solve failed, equation={equation}, solution={solution}")
-                return solution
-            solution = self.Kw / solution
+        except Exception:
+            solution = nsolve(equation, (Decimal("1E-20"), Decimal("100")),
+                              solver="bisect", verify=False, maxsteps=500, tol=power(10, tol))
+        if solution < 0:
+            raise RuntimeError(f"Solve failed, equation={equation}, solution={solution}")
         return solution
 
     def solve(self, initial_value=Decimal("1E-7")):
@@ -62,7 +76,7 @@ class WaterSystem:
         charge_eq = self.cH - self.Kw / self.cH
         for i in self.groups:
             for j in i.species:
-                charge_eq += mapping[j]*j.charge
+                charge_eq += mapping[j] * j.charge
         solution = self._solve(charge_eq, initial_value)
         # check_solution(charge_eq, mapping, solution, self.cH)
         return solution
